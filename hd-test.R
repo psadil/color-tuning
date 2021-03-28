@@ -1,9 +1,8 @@
 library(hdf5r)
 
-f <- H5File$new("second.hdf5", mode="r")
+f <- H5File$new("data.hdf5", mode="r")
 
-class_table_mapping <- f[["class_table_mapping"]]
-class_table_mapping[]
+f[["class_table_mapping"]][]
 
 data_collection <- f[["data_collection"]]
 
