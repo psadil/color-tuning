@@ -1,12 +1,12 @@
 # TODO:
 # - monitor configurations (for lab + hmrc)
-# - demographics (how to get inside hdf5 file?)
 # - make portable?
 # - add colors (true cielab requires info about monitor -- and info not specified in paper)
 # - change display backed to pyglfw (to enable setting refresh rate)
 # - implement eyetracking
 # - gamma?
 # - check that trial['dots_end'] and trial['fix_start'] are 1 refresh cycle apart
+# - dots seem to be asymmetric?
 
 # notes to be careful about:
 # To prevent learning of dot patterns, new stimuli were generated for each
@@ -31,11 +31,15 @@ import git
 
 from psychopy import core, visual, data, clock, monitors
 from psychopy.data.trial import TrialHandler
-import psychopy.info
+from psychopy.info import RunTimeInfo
 from psychopy.iohub.client import ioHubConnection
 from psychopy.iohub.client.connect import launchHubServer
 from psychopy.tools import colorspacetools as cst
+from psychopy.tools.monitorunittools import deg2pix
+from psychopy.gui import Dlg
+from dot import WrappedDot
 # from psychopy.iohub.util import getCurrentDateTimeString
+
 
 class Experiment(object):
     
@@ -44,11 +48,17 @@ class Experiment(object):
     fix_radius = 0.1
     n_fleur_vertex = 10
     refresh_rate = 60
-    dot_sec = 1
+    cue_sec = 1
+    dot_sec = 3
     n_flips_per_dots = dot_sec * refresh_rate
     isi_sec = 0.5
+    dot_speed_deg_per_sec = 1.67
 
-    def __init__(self):
+    def __init__(self, no_demographics = False, sub=0, run=999):
+
+        if not no_demographics:
+            demographics = self.solicit_demographics()
+
         iohub_config = {
           'eyetracker.hw.sr_research.eyelink.EyeTracker': {
             'name': 'tracker',
@@ -66,12 +76,18 @@ class Experiment(object):
                 },
             'session_info': {
             'user_variables': {
-                'date': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                'sub': 1,
-                'run': 1}}}
+                'date': datetime.now().strftime("%d-%m-%Y_%H-%M-%S"),
+                'sub': sub,
+                'run': run,
+                'sex': demographics[0],
+                'ethnicity': demographics[1],
+                'race': demographics[2],
+                'age': demographics[3]}}}
 
         self.trials = os.path.join('stimuli','design.csv')
         self.io = iohub_config
+
+        self.mon = monitors.Monitor("default", distance=60.96)
 
         # create a window to draw in
         self.win = visual.Window(
@@ -81,9 +97,13 @@ class Experiment(object):
             blendMode='avg', 
             useFBO=True,
             units="deg",
-            monitor=monitors.Monitor("default", distance=60.96),
+            monitor=self.mon,
             # gamma = [r.gamma, g.gamma, b.gamma],
             color='black')
+
+        runinfo = RunTimeInfo(verbose=True, userProcsDetailed=True, win=self.win, refreshTest=True)
+        with open(os.path.join('data-raw', f'sub-{sub}_run-{run}_runinfo.pkl'), 'xb') as f:
+            pickle.dump(runinfo, f)
 
         self.fix = visual.Circle(win=self.win, radius=self.fix_radius, size=1, fillColor="white")
         # cues for color
@@ -97,20 +117,20 @@ class Experiment(object):
             end=(math.sqrt(3)/2, math.sqrt(3)/2), lineColor="gray", size=self.radius)
         self.fleur = visual.ShapeStim(win=self.win, size=self.radius, lineColor="gray", lineWidth=self.linewidth, vertices=self.__make_vertices())
 
-        self.dots = visual.DotStim(
+        self.dots = WrappedDot(
             win=self.win,
+            units='deg',
             fieldShape="circle",
-            dotSize=3,
-            dotLife=20,
+            dotSize=deg2pix(0.08, self.mon),
+            dotLife=-1,
             coherence=1,
-            nDots=30,
-            fieldSize=5,
-            speed=0.01,
-            noiseDots='direction')
+            nDots=400,
+            fieldSize=3.2, # diameter
+            speed=self.dot_speed_deg_per_sec / self.refresh_rate)
 
         self.waiter = clock.StaticPeriod(screenHz=self.refresh_rate)
-
-        
+    
+                
     @property
     def trials(self) -> TrialHandler:
         return self.__trials
@@ -166,6 +186,28 @@ class Experiment(object):
         io.devices.tracker.runSetupProcedure()
 
         self.__io = io
+
+    @staticmethod
+    def solicit_demographics() -> Tuple[str, str, str, str]:
+
+        dlg = Dlg(title="Demographics")
+        dlg.addText('''The National Institute of Health requests basic demographic information (sex, ethnicity, race, and age)
+        for clinical or behavioral studies, to the extent that this information is provided by research participants.
+    
+        You are under no obligation to provide this information. If you would rather not answer these questions, 
+        you will still receive full compensation for your participation in this study and the data you provide will still be useful for our research.
+        ''')
+        dlg.addField('sex at birth:', choices=['Female', 'Male', 'Other', 'Rather not say'])
+        dlg.addField('ethnicity:', choices= ['Hispanic or Latino', 'Not Hispanic or Latino', 'Rather not say'])
+        dlg.addField('race:', choices= ['American Indian/Alaska Native', 'Asian', 'Black or African American', 'Native Hawaiian or Other Pacific Islander', 'White', 'Rather not say'])
+        dlg.addField('age:', choices=[x for x in range(18, 51)] + ['Rather not say'])
+        demographics = dlg.show()
+
+        if dlg.OK == False: # user pressed cancel
+            # fine to quit here, since nothing important has been opened
+            core.quit()  
+
+        return demographics
         
 
     @staticmethod
@@ -229,7 +271,7 @@ class Experiment(object):
             self.fix.draw()
             self.waiter.complete()
             trial['cue_start'] = self.win.flip()
-            self.waiter.start(1)
+            self.waiter.start(self.cue_sec)
 
             # stim
             # 1 second, hard coded at 60hz refresh rate
@@ -280,13 +322,15 @@ if __name__ == "__main__":
     example_usage = '''example:
     python main.py 
     python main.py -s 1 -r 1
+    python main.py --no-demographics
     '''
     
     parser = argparse.ArgumentParser(epilog=example_usage, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-s", "--sub", help="Subject ID. defaults to 0", type=int, default=0)
     parser.add_argument("-r", "--run", help="run ID. defaults to 999", type=int, default=999)
+    parser.add_argument("--no-demographics", help="don't ask for demographic information", action='store_true', default=False)
     args = parser.parse_args()
 
-    experiment = Experiment()
+    experiment = Experiment(no_demographics=args.no_demographics, sub=args.sub, run=args.run)
     experiment.run()
     core.quit()
