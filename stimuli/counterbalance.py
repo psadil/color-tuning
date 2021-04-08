@@ -12,8 +12,8 @@ options = {
     'repetition': range(0, 2),
     'direction': [-90, -30, -5, 0, 5, 30, 90],
     'hue': [0, 60, 85, 90, 95, 120, 180],
-    'chroma': [100],
-    'lightness': [100],
+    'chroma': [15],
+    'lightness': [90],
     'shape': ['fleur', 'circle', 'cross', 'triangle']}
 
 d = pd.DataFrame({r: dict(zip(options.keys(),v)) for r, v in enumerate(product(*options.values()))}).T
