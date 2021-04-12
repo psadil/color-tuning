@@ -3,10 +3,9 @@
 # - make portable?
 # - add colors (true cielab requires info about monitor -- and info not specified in paper)
 # - change display backed to pyglfw (to enable setting refresh rate)
-# - test eyetracking
 # - gamma?
 # - check that trial['dots_end'] and trial['fix_start'] are 1 refresh cycle apart
-# - block
+# - annex data
 
 # notes to be careful about:
 # To prevent learning of dot patterns, new stimuli were generated for each
@@ -22,14 +21,14 @@ import pickle
 import os
 import math
 from datetime import datetime
-from typing import TextIO, Tuple, List
+from typing import TextIO, Tuple, List, Optional
+import sys
 
 import numpy as np
 import pandas as pd
 import git
 
 from psychopy import core, visual, data, clock, monitors
-from psychopy.data.trial import TrialHandler
 from psychopy.info import RunTimeInfo
 from psychopy.iohub.client import ioHubConnection
 from psychopy.iohub.client.connect import launchHubServer
@@ -68,19 +67,11 @@ class Experiment(object):
         run=999,
         task = 'test'):
 
-        self.task = task
+        self.sub = sub
 
-        demographics = self.solicit_demographics(no_demographics)
-
-        if task == 'main':
+        if task=='main':
+            demographics = self.solicit_demographics(no_demographics)
             iohub_config = {
-                'eyetracker.hw.sr_research.eyelink.EyeTracker': {
-                    'name': 'tracker',
-                    'model_name': 'EYELINK 1000 DESKTOP',
-                    'enable_interface_without_connection': True,
-                    'runtime_settings': {
-                        'sampling_rate': 1000,
-                        'track_eyes': 'RIGHT'}},
                 'experiment_code': 'color',
                 'datastore_name': 'data',
                 'session_code': task,
@@ -89,25 +80,25 @@ class Experiment(object):
                 'session_info': {
                 'user_variables': {
                     'date': datetime.now().strftime("%d-%m-%Y_%H-%M-%S"),
-                    'sub': sub,
+                    'sub': self.sub,
                     'run': run,
                     'sex': demographics[0],
                     'ethnicity': demographics[1],
                     'race': demographics[2],
                     'age': demographics[3]}}}
         else:
-            iohub_config = {
-                'eyetracker.hw.sr_research.eyelink.EyeTracker': {
-                    'name': 'tracker',
-                    'model_name': 'EYELINK 1000 DESKTOP',
-                    'enable_interface_without_connection': True,
-                    'runtime_settings': {
-                        'sampling_rate': 1000,
-                        'track_eyes': 'RIGHT'}}}
+            iohub_config = {}
 
+        self.trialdf = self.__prep_df(os.path.join('stimuli','design.csv'))
 
-        self.trials = os.path.join('stimuli','design.csv')
         self.io = iohub_config
+
+        # Inform the ioHub server about the TrialHandler
+        # randomization already done (hence 'sequential')
+        self.io.createTrialHandlerRecordTable(data.TrialHandler(
+            [x for x in (self.trialdf.T.to_dict()).values()], 
+            nReps=1,
+            method='sequential')) 
 
         self.mon = monitors.Monitor("default", distance=60.96)
 
@@ -125,9 +116,10 @@ class Experiment(object):
 
         if task == 'main':
             runinfo = RunTimeInfo(verbose=True, userProcsDetailed=True, win=self.win, refreshTest=True)
-            with open(os.path.join('data-raw', f'sub-{sub}_task-{task}_run-{run}_runinfo.pkl'), 'xb') as f:pickle.dump(runinfo, f)
+            with open(os.path.join('data-raw', f'sub-{self.sub}_task-{task}_run-{run}_runinfo.pkl'), 'xb') as f:pickle.dump(runinfo, f)
 
         self.fix = visual.Circle(win=self.win, radius=self.fix_radius, size=1, fillColor="white")
+
         # cues for color
         self.triangle = visual.Polygon(win=self.win, radius=self.radius, lineColor="gray", lineWidth=self.linewidth)
         self.circle = visual.Circle(win=self.win, radius=self.radius, lineColor="gray", lineWidth=self.linewidth)
@@ -152,33 +144,50 @@ class Experiment(object):
 
         self.correct = TextStim(self.win, text = "CORRECT", color="green")
         self.incorrect = TextStim(self.win, text = "INCORRECT", color="red")
+        self.welcome = TextStim(self.win, text=
+        '''
+        welcome to the experiment
+
+        remember:
+        cross and flower shapes mean categorize direction
+        triangle and circle mean categorize color
+
+        when you are categorizing direction, press "left" for upwards and "right" for downwards
+        when you are categorizing color, press "left" for redder and "right" for greener
+
+        the first trial will start when you press the "c"
+        ''',
+        wrapWidth=50,
+        alignText="left")
         self.rest = TextStim(
             self.win,
             pos=(0, 6),
             alignText="left",
-            wrapWidth = 50)
+            wrapWidth=50)
 
         self.waiter = clock.StaticPeriod(screenHz=self.refresh_rate)
 
-
+    
     @property
-    def task(self) -> str:
-        return self.__task
+    def win(self) -> visual.Window:
+        return self.__win
 
-    @task.setter
-    def task(self, task):        
-        self.__task = task
-                
-    @property
-    def trials(self) -> TrialHandler:
-        return self.__trials
+    
+    @win.setter
+    def win(self, win: visual.Window) -> None:
+        self.__win = win
+
+    
+    @win.deleter
+    def win(self) -> None:
+        self.__win.close()
+        del self.__win
 
 
-    @trials.setter
-    def trials(self, design: TextIO):
+    def __prep_df(self, design: TextIO) -> pd.DataFrame:
         d = pd.read_csv(design)
                 
-        d_sub = (d.loc[d['sub']==0]
+        d_sub = (d.loc[d['sub']==self.sub]
             .sort_values(by=['block','trial'])
             .assign(
                 fix_start = float('NaN'),
@@ -199,20 +208,16 @@ class Experiment(object):
         d_sub['R'] = [x[0] for x in d_sub['rgb']]
         d_sub['G'] = [x[1] for x in d_sub['rgb']]
         d_sub['B'] = [x[2] for x in d_sub['rgb']]
-        self.trialdf = d_sub.drop('rgb', axis=1)
+        return d_sub.drop('rgb', axis=1)
 
-        # organize them with the trial handler
-        self.__trials = data.TrialHandler(
-            [x for x in (self.trialdf.T.to_dict()).values()], 
-            nReps=1,
-            method='sequential') # randomization already done
 
     @property
     def trialdf(self) -> pd.DataFrame:
         return self.__trialdf
 
+
     @trialdf.setter
-    def trialdf(self, df):
+    def trialdf(self, df: pd.DataFrame) -> None:
         self.__trialdf = df
 
 
@@ -222,18 +227,18 @@ class Experiment(object):
 
 
     @io.setter
-    def io(self, iohub_config: dict):
+    def io(self, iohub_config: dict) -> None:
         # Start the ioHub process. 'io' can now be used during the
         # # experiment to access iohub devices and read iohub device events.
         io = launchHubServer(**iohub_config)
-
-        # Inform the ioHub server about the TrialHandler
-        io.createTrialHandlerRecordTable(self.trials)
-
-        # run eyetracker calibration
-        # io.devices.tracker.runSetupProcedure()
-
         self.__io = io
+
+
+    @io.deleter
+    def io(self) -> None:
+        self.__io.quit()
+        del self.__io
+
 
     @staticmethod
     def solicit_demographics(no_demographics) -> Tuple[str, str, str, str]:
@@ -295,119 +300,121 @@ class Experiment(object):
             self.fleur.draw()
 
 
-    def prep_dots(self, trial: dict) -> None:
-        self.dots.dir = trial.direction
-        self.dots.color = [trial.R, trial.G, trial.B]
+    def __prep_dots(self, direction: float, rgb: Tuple[float, float, float]) -> None:
+        self.dots.dir = direction
+        self.dots.color = rgb
 
+
+    @property
+    def presses(self) -> dict:
+        return self.__presses
+
+    
+    @presses.setter
+    def presses(self, presses: Optional[dict]) -> None:
+
+        if presses and presses[0].key == 'escape':
+            sys.exit()
+        else:    
+            self.__presses = presses
+    
 
     # run the experiment
     def run(self) -> None:
         self.win.setMouseVisible(False)
 
-        self.io.devices.tracker.setRecordingState(True)
-        # self.win.flip()
-        self.fix.draw()
+        self.welcome.draw()
         self.win.flip()
-        # launchScan(
-        #     self.win, 
-        #     settings={'TR': 1, 'volumes': 0, 'sync':'5', 'skip': 0, 'sound': False}, 
-        #     globalClock=None, 
-        #     mode='test',
-        #     instr=None)
+        self.io.devices.keyboard.waitForPresses(keys=['c'])
 
-        self.waiter.start(self.initial_pause_sec)
-        for t, trial in enumerate(self.trials):  
-                        
-            # fixation
+        for block in self.trialdf.block.unique():
             self.fix.draw()
-            self.waiter.complete()
-            trial['fix_start'] = self.win.flip()
-            self.waiter.start(self.fix_sec)
-            # self.io.devices.tracker.sendMessage(f'TRIALID {t}')
-            # self.io.devices.tracker.sendCommand('record_status_message', f'TRIAL {t}')
-            self.prep_dots(trial)
-            
-            # cue
-            self.__drawcue(trial.shape)
-            self.fix.draw()
-            self.waiter.complete()
-            trial['cue_start'] = self.win.flip()
-            self.waiter.start(self.cue_sec)
-
-            # stim
-            # 1 second, hard coded at 60hz refresh rate
-            for flip in range(0, self.n_flips_per_dots):
-                self.dots.draw()
+            self.win.flip()
+            self.waiter.start(self.initial_pause_sec)
+            for __t in self.trialdf.query(f'block == {block}').itertuples():
+                trial = __t._asdict()
+                # fixation
                 self.fix.draw()
-
-                if flip == 0: 
-                    self.waiter.complete()
-                    self.io.clearEvents()
-                
-                now = self.win.flip()
-                self.io.sendMessageEvent(f'trial-{t}_flip-{flip}', category="flip", sec_time=now)
-
-                if flip == 0:
-                    trial['dots_start'] = now
-            
-                presses = self.io.devices.keyboard.getPresses(keys=['left','right','escape'])
-                if presses:
-                    break                    
-                                        
-            # record trial results (if any) and prepare for next trial            
-            trial['dots_end'] = now
-            if presses:                    
-                trial['response_time'] = presses[0].time
-                trial['response_key'] = presses[0].key
-
-            # stop running if last press said to
-            if trial['response_key'] == 'escape':
-                return
-
-            trial['correct'] = (
-                (trial['response_key'] == 'left' and 
-                  (trial.shape in ['triangle', 'circle'] and trial.hue <= 90) 
-                  or (trial.shape in ['cross', 'fleur'] and trial.direction >= 0))
-              or (trial['response_key'] == 'right' and 
-                  (trial.shape in ['triangle', 'circle'] and trial.hue >= 90) 
-                  or (trial.shape in ['cross', 'fleur'] and trial.direction <= 0)))
-            if trial['correct']:
-                self.correct.draw()
-            else:
-                self.incorrect.draw()
-
-            trial['feedback_start'] = self.win.flip()
-            self.waiter.start(self.feedback_sec)            
-            
-            # At the end of each trial, before getting
-            # the next trial handler row, send the trial
-            # variable states to iohub so they can be stored for future
-            # reference.
-            self.io.addTrialHandlerRecord(trial)
-
-            if ((not self.trialdf.block[t] == max(self.trialdf.block)) and
-                (not self.trialdf.block[t] == self.trialdf.block[t+1])):
-                self.rest.text = f'''
-                you have just completed {(self.trialdf.block[t]+1)/(max(self.trialdf.block)+1):.0%} of the experiment 
-                please take a brief break
-
-                remember:
-                cross and flower shapes mean categorize direction
-                triangle and circle mean categorize color
-
-                when you are categorizing direction, press "left" for upwards and "right" for downwards
-                when you are categorizing color, press "left" for redder and "right" for bluer
-
-                when you are ready to continue, press "c"
-                '''
-                self.rest.draw()
                 self.waiter.complete()
-                self.win.flip()
-                self.io.devices.keyboard.waitForPresses(keys=['c'])
+                trial['fix_start'] = self.win.flip()
+                self.waiter.start(self.fix_sec)
+                self.__prep_dots(trial['direction'], (trial['R'], trial['G'], trial['B']))
+            
+                # cue
+                self.__drawcue(trial['shape'])
                 self.fix.draw()
-                self.win.flip()
-                self.waiter.start(self.initial_pause_sec)
+                self.waiter.complete()
+                trial['cue_start'] = self.win.flip()
+                self.waiter.start(self.cue_sec)
 
+                # stim
+                for flip in range(0, self.n_flips_per_dots):
+                    self.draw_list([self.dots, self.fix])
+
+                    if flip == 0: 
+                        self.waiter.complete()
+                        self.io.clearEvents()
+                
+                    now = self.win.flip()
+                    self.io.sendMessageEvent(f'trial-{trial["trial"]}_flip-{flip}', category="flip", sec_time=now)
+
+                    if flip == 0:
+                        trial['dots_start'] = now
+            
+                    self.presses = self.io.devices.keyboard.getPresses(keys=['left','right','escape'])
+                    if self.presses:
+                        break                    
+                                        
+                # record trial results (if any) and prepare for next trial            
+                trial['dots_end'] = now
+                if self.presses:                    
+                    trial['response_time'] = self.presses[0].time
+                    trial['response_key'] = self.presses[0].key
+
+                trial['correct'] = (
+                    (trial['response_key'] == 'left' and 
+                    (trial['shape'] in ['triangle', 'circle'] and trial['hue'] <= 90) 
+                    or (trial['shape'] in ['cross', 'fleur'] and trial['direction'] >= 0))
+                or (trial['response_key'] == 'right' and 
+                    (trial['shape'] in ['triangle', 'circle'] and trial['hue'] >= 90) 
+                    or (trial['shape'] in ['cross', 'fleur'] and trial['direction'] <= 0)))
+                if trial['correct']:
+                    self.correct.draw()
+                else:
+                    self.incorrect.draw()
+
+                trial['feedback_start'] = self.win.flip()
+                self.waiter.start(self.feedback_sec)            
+            
+                # At the end of each trial, before getting
+                # the next trial handler row, send the trial
+                # variable states to iohub so they can be stored for future
+                # reference.
+                self.io.addTrialHandlerRecord(trial)
+
+            self.rest.text = f'''
+            you have just completed {(block+1)/(max(self.trialdf.block)+1):.0%} of the experiment 
+            please take a brief break
+
+            remember:
+            cross and flower shapes mean categorize direction
+            triangle and circle mean categorize color
+
+            when you are categorizing direction, press "left" for upwards and "right" for downwards
+            when you are categorizing color, press "left" for redder and "right" for greener
+
+            when you are ready to continue, press "c"
+            '''
+            self.rest.draw()
+            self.waiter.complete()
+            self.win.flip()
+            self.io.devices.keyboard.waitForPresses(keys=['c'])
+
+
+    @staticmethod
+    def draw_list(stims) -> None:
+        for x in stims:
+            x.draw()
 
     def instruct(self) -> None:
         self.win.setMouseVisible(False)
@@ -446,33 +453,18 @@ class Experiment(object):
 
         self.io.clearEvents()
         while 1:
-            text.draw()
-            self.dots.draw()
-            self.fix.draw()
+            self.draw_list([text, self.dots, self.fix])
             self.win.flip()    
-            presses = self.io.devices.keyboard.getPresses(keys=['left','escape'])
-            if presses:
-                if presses[0].key == 'escape':
-                    return
-                else:
-                    break
+            self.presses = self.io.devices.keyboard.getPresses(keys=['left','escape'])
+            if self.presses:
+                break
 
         # color cues
         text.text = '''
         when you see these cues, categorize the color
         when the dots are more red, press "left"
-        when the dots are more blue, press "right"
+        when the dots are more green, press "right"
         '''
-        # Create array 
-        # size0 = 500
-        # size1 = 50
-        # lab = 90*np.ones([size0,size1,3], dtype=float)
-        # hues = np.radians(np.linspace(0, 180, size1, endpoint=True))
-        # lab[:,:,1] = 15*np.cos(hues)
-        # lab[:,:,2] = 15*np.sin(hues)
-        # Convert to RGB
-        # rgb = cst.cielab2rgb(lab, clip=True)
-        # palette = visual.ImageStim(win=self.win, image=rgb, units='pix', size=(size0, size1), ori=90, pos=(500,0))
 
         self.triangle.pos = (-1,0)
         self.circle.pos = (1,0)
@@ -486,22 +478,17 @@ class Experiment(object):
 
         self.io.devices.keyboard.waitForPresses()
         text.text = '''
-        here, the dots are more blue
+        here, the dots are more green
         so you want to press "right"
         '''
 
         self.io.clearEvents()
         while 1:
-            text.draw()
-            self.dots.draw()
-            self.fix.draw()
+            self.draw_list([text, self.dots, self.fix])
             self.win.flip()    
-            presses = self.io.devices.keyboard.getPresses(keys=['right','escape'])
-            if presses:
-                if presses[0].key == 'escape':
-                    return
-                else:
-                    break
+            self.presses = self.io.devices.keyboard.getPresses(keys=['right','escape'])
+            if self.presses:
+                break
 
         text.text = '''
         in summary: 
@@ -509,7 +496,7 @@ class Experiment(object):
         triangle and circle mean categorize color
 
         when you are categorizing direction, press "left" for upwards and "right" for downwards
-        when you are categorizing color, press "left" for redder and "right" for bluer
+        when you are categorizing color, press "left" for redder and "right" for greener
 
         in the actual experiment, everything will happen more quickly
         '''
@@ -525,34 +512,24 @@ class Experiment(object):
         self.waiter.start(self.fix_sec)
 
         # cue
-        self.triangle.draw()
-        self.fix.draw()
+        self.draw_list(self.triangle, self.fix)
         self.waiter.complete()
         self.win.flip()
         self.waiter.start(self.cue_sec)
 
         # stim
         for flip in range(0, self.n_flips_per_dots):
-            self.dots.draw()
-            self.fix.draw()
+            self.draw_list([self.dots, self.fix])
 
             if flip == 0: 
                 self.waiter.complete()
                 self.io.clearEvents()
                 
             self.win.flip()
-            presses = self.io.devices.keyboard.getPresses(keys=['right'])
-            if presses:
+            self.presses = self.io.devices.keyboard.getPresses(keys=['right', 'escape'])
+            if self.presses:
                 break
-    
-        
-
-    def __del__(self):
-        self.io.devices.tracker.setRecordingState(False)
-        self.io.devices.tracker.setConnectionState(False)
-        self.io.quit()
-        self.win.close()
-        
+            
 
 if __name__ == "__main__":
     example_usage = '''example:
