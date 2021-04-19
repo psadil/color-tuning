@@ -6,14 +6,11 @@
 # - gamma?
 # - check that trial['dots_end'] and trial['fix_start'] are 1 refresh cycle apart
 # - annex data
+# - eyetracking
 
 # notes to be careful about:
-# To prevent learning of dot patterns, new stimuli were generated for each
-# recording session. To rule out effects of stimulus variability on neuronal choice
-# information, the same stimulus (dot pattern) was used for all trials per recording session.
-
-# also, pylink install is manual. that is, it's downloaded from sr-research site, unpacked
-# and then put into psychopy/lib/python3.6/site-packages/pylink
+# - pylink install is manual. that is, it's downloaded from sr-research site, unpacked
+#   and then put into psychopy/lib/python3.6/site-packages/pylink
 
 
 import argparse
@@ -104,9 +101,10 @@ class Experiment(object):
 
         # create a window to draw in
         self.win = visual.Window(
+            size=(1920, 1080),
             fullscr=True,
             allowGUI=False,
-            winType='pyglet',
+            winType='pyglfw',
             blendMode='avg', 
             useFBO=True,
             units="deg",
@@ -415,6 +413,7 @@ class Experiment(object):
     def draw_list(stims) -> None:
         for x in stims:
             x.draw()
+
 
     def instruct(self) -> None:
         self.win.setMouseVisible(False)
