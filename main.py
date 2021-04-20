@@ -20,6 +20,7 @@ import math
 from datetime import datetime
 from typing import TextIO, Tuple, List, Optional
 import sys
+from platform import node
 
 import numpy as np
 import pandas as pd
@@ -70,7 +71,7 @@ class Experiment(object):
             demographics = self.solicit_demographics(no_demographics)
             iohub_config = {
                 'experiment_code': 'color',
-                'datastore_name': 'data',
+                'datastore_name': node(),
                 'session_code': task,
                 'experiment_info': {
                     'version': str(git.repo.fun.rev_parse(git.Repo(), 'HEAD'))[0:6]},
@@ -146,16 +147,7 @@ class Experiment(object):
         '''
         welcome to the experiment
 
-        remember:
-        always keeps your eyes on the center dot
-
-        cross and flower shapes mean categorize direction
-        triangle and circle mean categorize color
-
-        when you are categorizing direction, press "left" for upwards and "right" for downwards
-        when you are categorizing color, press "left" for redder and "right" for greener
-
-        the first trial will start when you press the "c"
+        Press "c" to continue
         ''',
         wrapWidth=50,
         alignText="left")
@@ -325,9 +317,27 @@ class Experiment(object):
 
         self.welcome.draw()
         self.win.flip()
+        self.io.clearEvents()
         self.io.devices.keyboard.waitForPresses(keys=['c'])
 
         for block in self.trialdf.block.unique():
+            self.rest.text = f'''
+            you are about to start part {block+1} of {self.trialdf.block.max()+1} in the experiment                         
+
+            remember:
+            cross and flower shapes mean categorize direction
+            triangle and circle mean categorize color
+
+            when you are categorizing direction, press "left" for upwards and "right" for downwards
+            when you are categorizing color, press "left" for redder and "right" for greener
+
+            when you are ready to begin this part, press "c"
+            '''
+            self.rest.draw()
+            self.win.flip()
+            self.io.clearEvents()
+            self.io.devices.keyboard.waitForPresses(keys=['c'])
+
             self.fix.draw()
             self.win.flip()
             self.waiter.start(self.initial_pause_sec)
@@ -373,11 +383,11 @@ class Experiment(object):
 
                 trial['correct'] = (
                     (trial['response_key'] == 'left' and 
-                    (trial['shape'] in ['triangle', 'circle'] and trial['hue'] <= 90) 
-                    or (trial['shape'] in ['cross', 'fleur'] and trial['direction'] >= 0))
+                      ((trial['shape'] in ['triangle', 'circle'] and trial['hue'] <= 90) 
+                      or (trial['shape'] in ['cross', 'fleur'] and trial['direction'] >= 0)))
                 or (trial['response_key'] == 'right' and 
-                    (trial['shape'] in ['triangle', 'circle'] and trial['hue'] >= 90) 
-                    or (trial['shape'] in ['cross', 'fleur'] and trial['direction'] <= 0)))
+                    ((trial['shape'] in ['triangle', 'circle'] and trial['hue'] >= 90) 
+                    or (trial['shape'] in ['cross', 'fleur'] and trial['direction'] <= 0))))
                 if trial['correct']:
                     self.correct.draw()
                 else:
@@ -391,24 +401,30 @@ class Experiment(object):
                 # variable states to iohub so they can be stored for future
                 # reference.
                 self.io.addTrialHandlerRecord(trial)
+            
+            if block == self.trialdf.block.max():
+                msg = '''
+                you have reached the end of the experiment!
 
-            self.rest.text = f'''
-            you have just completed {(block+1)/(max(self.trialdf.block)+1):.0%} of the experiment 
-            please take a brief break
+                please go find the researcher and let them know you finished
+                '''
+            else:
+                msg = f'''
+                congrats! you have just finished that part
+                the time is currently {datetime.now().strftime("%H:%M")}
 
-            remember:
-            cross and flower shapes mean categorize direction
-            triangle and circle mean categorize color
+                please take a brief break
 
-            when you are categorizing direction, press "left" for upwards and "right" for downwards
-            when you are categorizing color, press "left" for redder and "right" for greener
+                when you are ready to continue, press "c"
+                '''
 
-            when you are ready to continue, press "c"
-            '''
+            self.rest.text = msg
             self.rest.draw()
             self.waiter.complete()
             self.win.flip()
+            self.io.clearEvents()
             self.io.devices.keyboard.waitForPresses(keys=['c'])
+
 
 
     @staticmethod
@@ -581,7 +597,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(epilog=example_usage, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-s", "--sub", help="Subject ID. defaults to 0", type=int, default=0)
     parser.add_argument("-r", "--run", help="run ID. defaults to 999", type=int, default=999)
-    parser.add_argument("-t", "--task", help="task flag. one of 'test', 'instruct', 'main'", choices=['test', 'instruct', 'main'], default='test')
+    parser.add_argument("-t", "--task", help="task flag. one of 'test', 'instruct', 'main'", choices=['test', 'instruct', 'main'], default='main')
     parser.add_argument("--no-demographics", help="don't ask for demographic information", action='store_true', default=False)
     args = parser.parse_args()
 
