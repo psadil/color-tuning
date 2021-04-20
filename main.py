@@ -61,14 +61,11 @@ class Experiment(object):
     def __init__(
         self, 
         no_demographics = False, 
-        sub=0, 
-        run=999,
-        task = 'test'):
-
-        self.sub = sub
-
+        task = 'test'):        
+        
         if task=='main':
-            demographics = self.solicit_demographics(no_demographics)
+            self.sub = self.solicit_subid()
+            demographics = self.solicit_demographics(no_demographics)            
             iohub_config = {
                 'experiment_code': 'color',
                 'datastore_name': node(),
@@ -79,13 +76,13 @@ class Experiment(object):
                 'user_variables': {
                     'date': datetime.now().strftime("%d-%m-%Y_%H-%M-%S"),
                     'sub': self.sub,
-                    'run': run,
                     'sex': demographics[0],
                     'ethnicity': demographics[1],
                     'race': demographics[2],
                     'age': demographics[3]}}}
         else:
             iohub_config = {}
+            self.sub = 0
 
         self.trialdf = self.__prep_df(os.path.join('stimuli','design.csv'))
 
@@ -115,7 +112,7 @@ class Experiment(object):
 
         if task == 'main':
             runinfo = RunTimeInfo(verbose=True, userProcsDetailed=True, win=self.win, refreshTest=True)
-            with open(os.path.join('data-raw', f'sub-{self.sub}_task-{task}_run-{run}_runinfo.pkl'), 'xb') as f:pickle.dump(runinfo, f)
+            with open(os.path.join('data-raw', f'sub-{self.sub}_task-{task}_runinfo.pkl'), 'xb') as f:pickle.dump(runinfo, f)
 
         self.fix = visual.Circle(win=self.win, radius=self.fix_radius, size=1, fillColor="white")
 
@@ -256,6 +253,18 @@ class Experiment(object):
 
         return demographics
         
+
+    @staticmethod
+    def solicit_subid() -> int:
+
+        dlg = Dlg(title="Participant")
+        dlg.addField('ID:', choices=[x for x in range(0, 31)])
+        ID = dlg.show()        
+        if dlg.OK == False: # user pressed cancel
+            # fine to quit here, since nothing important has been opened
+            core.quit()  
+
+        return ID[0]
 
     @staticmethod
     def __make_vertex(angle: float, a: float = radius, b: float = radius/3) -> Tuple[float, float]:
@@ -590,17 +599,15 @@ class Experiment(object):
 if __name__ == "__main__":
     example_usage = '''example:
     python main.py 
-    python main.py -s 1 -r 1 -t main
+    python main.py -t main
     python main.py --no-demographics
     '''
     
     parser = argparse.ArgumentParser(epilog=example_usage, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-s", "--sub", help="Subject ID. defaults to 0", type=int, default=0)
-    parser.add_argument("-r", "--run", help="run ID. defaults to 999", type=int, default=999)
     parser.add_argument("-t", "--task", help="task flag. one of 'test', 'instruct', 'main'", choices=['test', 'instruct', 'main'], default='main')
     parser.add_argument("--no-demographics", help="don't ask for demographic information", action='store_true', default=False)
     args = parser.parse_args()
 
-    experiment = Experiment(no_demographics=args.no_demographics, sub=args.sub, run=args.run, task=args.task)
+    experiment = Experiment(no_demographics=args.no_demographics, task=args.task)
     experiment.run()
     core.quit()
