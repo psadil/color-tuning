@@ -104,7 +104,7 @@ class Experiment(object):
             size=(1920, 1080),
             fullscr=True,
             allowGUI=False,
-            winType='pyglfw',
+            winType='pyglet',
             blendMode='avg', 
             useFBO=True,
             units="deg",
@@ -147,6 +147,8 @@ class Experiment(object):
         welcome to the experiment
 
         remember:
+        always keeps your eyes on the center dot
+
         cross and flower shapes mean categorize direction
         triangle and circle mean categorize color
 
@@ -421,9 +423,29 @@ class Experiment(object):
         text = visual.TextStim(
             win=self.win,
             text='''
+            in this experiment you will see a bunch of colored dots move together
+            you will be asked to categorize either the color or the direction of motion
+            
+            press "c" to continue
+            ''',
+            pos=(0, 6),
+            alignText="left",
+            wrapWidth = 50)
+
+        text.draw()
+        self.win.flip()
+        self.io.clearEvents()
+        self.io.devices.keyboard.waitForPresses(keys=['c'])
+
+        text = visual.TextStim(
+            win=self.win,
+            text='''
             when you see these cues, categorize the motion
             when the dots are moving upwards, press "left"
-            when the dots are moving downwards, press "right"''',
+            when the dots are moving downwards, press "right"
+            
+            press "c" to continue
+            ''',
             pos=(0, 6),
             alignText="left",
             wrapWidth = 50)
@@ -437,13 +459,13 @@ class Experiment(object):
         text.draw()
         self.__drawcue('cross')
         self.__drawcue('fluer')
-        self.win.flip()
-        self.io.clearEvents()
+        self.win.flip()        
         self.line1.pos = (0,0)
         self.line2.pos = (0,0)
         self.fleur.pos = (0,0)
 
-        self.io.devices.keyboard.waitForPresses()
+        self.io.clearEvents()
+        self.io.devices.keyboard.waitForPresses(keys=['c'])
 
         text.text = '''
         here, the dots are moving upwards
@@ -462,7 +484,9 @@ class Experiment(object):
         text.text = '''
         when you see these cues, categorize the color
         when the dots are more red, press "left"
-        when the dots are more green, press "right"
+        when the dots are more green, press "right
+            
+        press "c" to continue"
         '''
 
         self.triangle.pos = (-1,0)
@@ -475,7 +499,7 @@ class Experiment(object):
         self.triangle.pos = (0,0)
         self.circle.pos = (0,0)
 
-        self.io.devices.keyboard.waitForPresses()
+        self.io.devices.keyboard.waitForPresses(keys=['c'])
         text.text = '''
         here, the dots are more green
         so you want to press "right"
@@ -498,12 +522,14 @@ class Experiment(object):
         when you are categorizing color, press "left" for redder and "right" for greener
 
         in the actual experiment, everything will happen more quickly
+            
+        press "c" to continue to a regular trial
         '''
 
         text.draw()
         self.win.flip()
         self.io.clearEvents()
-        self.io.devices.keyboard.waitForPresses()
+        self.io.devices.keyboard.waitForPresses(keys=['c'])
 
         # fixation
         self.fix.draw()
@@ -511,7 +537,7 @@ class Experiment(object):
         self.waiter.start(self.fix_sec)
 
         # cue
-        self.draw_list(self.triangle, self.fix)
+        self.draw_list([self.triangle, self.fix])
         self.waiter.complete()
         self.win.flip()
         self.waiter.start(self.cue_sec)
@@ -528,6 +554,21 @@ class Experiment(object):
             self.presses = self.io.devices.keyboard.getPresses(keys=['right', 'escape'])
             if self.presses:
                 break
+
+    
+        text.text = '''
+        lastly, a white dot will be visible throughout the experiment
+
+        when it is visible, please keep your eyes focused on that dot
+
+        press 'c' to conclude the instructions
+        '''
+
+        self.io.clearEvents()
+        self.draw_list([text, self.fix])
+        self.win.flip()
+        self.io.clearEvents()
+        self.io.devices.keyboard.waitForPresses(keys=['c'])
             
 
 if __name__ == "__main__":
